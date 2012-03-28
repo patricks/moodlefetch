@@ -4,6 +4,7 @@ import urllib
 import urllib2
 import getpass
 import cookielib
+import pynotify
 
 cj = cookielib.CookieJar()
 opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
@@ -106,13 +107,19 @@ def moodle_logout():
     debug('logout failed')
 
 def debug(msg):
-  if not config.get('general', 'silent') == "true":
+  if config.get('general', 'output') == "console":
     print msg
+  if config.get('general', 'output') == "notify":
+    n = pynotify.Notification("moodlefetch", msg)
+    n.show()
 
 if not config.get('moodle', 'password'):
   password = getpass.getpass()
 else:
   password = config.get('moodle', 'password')
+
+if config.get('general', 'output') == "notify":
+  pynotify.init("moodlefedch")
 
 moodle_login(config.get('moodle', 'username'), password)
 moodle_getcourses(config.get('moodle', 'semester'))
