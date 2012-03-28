@@ -1,0 +1,7 @@
+moodlefetch
+
+A small python script designed for students at 
+FH-Hagenberg (Upper Austria). Downloads all 
+available pdf documents of a selected semester 
+from the elearning platform and stores them 
+locally in a seperate folder for each course.
