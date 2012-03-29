@@ -4,8 +4,6 @@ import urllib
 import urllib2
 import getpass
 import cookielib
-if config.get('general', 'output') == "notify":
-  import pynotify
 
 cj = cookielib.CookieJar()
 opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
@@ -19,6 +17,9 @@ if len(sys.argv) == 2:
 else:
   usage()
   sys.exit()
+
+if config.get('general', 'output') == "notify":
+  import pynotify
 
 def moodle_login(username, password):
   uri = 'https://elearning.fh-hagenberg.at/login/index.php'
