@@ -4,7 +4,8 @@ import urllib
 import urllib2
 import getpass
 import cookielib
-import pynotify
+if config.get('general', 'output') == "notify":
+  import pynotify
 
 cj = cookielib.CookieJar()
 opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
