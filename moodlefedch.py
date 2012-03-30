@@ -5,18 +5,35 @@ import urllib2
 import getpass
 import cookielib
 
+#
+# DEFAULT CONFIGURATION PATH GOES HERE
+DEFAULTCONFIG = "~/.moodlefetch.cfg"
+
+#since the default urllib2 HTTPRedirectHandler leaves us no option to disable auto-redirects
+#we have to implement our own Handler in order to get the final urls and original filenames from moodle
+class MyHTTPRedirectHandler(urllib2.HTTPRedirectHandler):
+  def http_error_303(self, req, fp, code, msg, headers):
+    return headers.getheaders('location')[0]
+  http_error_301 = http_error_302 = http_error_307 = http_error_303
+
 cj = cookielib.CookieJar()
 opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
+openerNo303Handler = urllib2.build_opener(MyHTTPRedirectHandler, urllib2.HTTPCookieProcessor(cj))
 
 def usage():
   print('usage: %s [configfile]' % sys.argv[0])
+
+newfiles = 0 #lazyness...
 
 config = ConfigParser.RawConfigParser()
 if len(sys.argv) == 2:
   config.read(sys.argv[1])
 else:
-  usage()
-  sys.exit()
+  if os.path.isfile(os.path.expanduser(DEFAULTCONFIG)):
+    config.read(os.path.expanduser(DEFAULTCONFIG))
+  else:
+    usage()
+    sys.exit()
 
 if config.get('general', 'output') == "notify":
   import pynotify
@@ -52,6 +69,7 @@ def moodle_getcourses(semester):
     split = re.split('\.', re.sub(', ', '.', re.sub('">', '.', re.sub('</a>', '', match))))
     courseid = split[0]
     coursename = split[3]+"-"+split[5]
+    debug("looking for new files in: "+coursename)
     moodle_getfiles(courseid, coursename, config.get('general', 'dstdir'))
 
 def moodle_getfiles(courseid, coursename, dstdir):
@@ -68,15 +86,34 @@ def moodle_getfiles(courseid, coursename, dstdir):
   for match in matches:
     fileid = re.findall(r'(?<=id=)[0-9]+', match)
     files = re.findall(r'(?<=<span>).*<', match)
-    filename = path+'/'+re.sub('/', '_', re.sub('\<', '.pdf', re.sub(' ', '_', files[0])))
+    # filename['htmlsrc'] and filename['orig'] added to provide compatibility with archives generated before 2012-03-30
+    filename = {'htmlsrc':  '',
+                'orig':     ''}
+    filename['htmlsrc'] = path+'/'+re.sub('/', '_', re.sub('\<', '.pdf', re.sub(' ', '_', files[0])))
     uri = 'https://elearning.fh-hagenberg.at/mod/resource/view.php?inpopup=true&id='+fileid[0]
+    uri = openerNo303Handler.open(uri)
+    srcurl, filename['orig'] = uri.rsplit('/', 1)
+    try:
+      filename['orig'], args = filename['orig'].rsplit('?', 1)
+    except:
+      filename['orig'] = filename['orig']
+    
+    filename['orig'] = path+"/"+filename['orig']
+    #take care of older archives
+    if filename['htmlsrc'] in localFiles:
+      if filename['htmlsrc'] != filename['orig']:
+        debug("moved "+filename['htmlsrc']+" "+path+"/"+filename['orig'])
+        os.rename(filename['htmlsrc'], filename['orig'])
     if not config.get('general', 'forcedownload') == "true":
-      if filename not in localFiles:
-        moodle_fedch(uri, filename)
+      if filename['orig'] not in localFiles:
+        #also for older archives...
+        if filename['htmlsrc'] not in localFiles:
+          moodle_fedch(uri, filename['orig'])
     else:
-        moodle_fedch(uri, filename)
+        moodle_fedch(uri, filename['orig'])
 
 def moodle_fedch(uri, filename):
+  newfiles = 1
   req = urllib2.Request(uri)
   f = opener.open(req)
   debug('writing: '+filename)
@@ -125,4 +162,6 @@ if config.get('general', 'output') == "notify":
 
 moodle_login(config.get('moodle', 'username'), password)
 moodle_getcourses(config.get('moodle', 'semester'))
+if newfiles == 0:
+  debug("no new files");
 moodle_logout()
