@@ -51,6 +51,9 @@ else:
 if config.get('general', 'output') == "notify":
   import pynotify
 
+if config.get('general', 'keyring') == "true":
+  import keyring
+
 def moodle_login(username, password):
   uri = 'https://elearning.fh-hagenberg.at/login/index.php'
   req = urllib2.Request(uri)
@@ -168,13 +171,23 @@ def debug(msg):
     n = pynotify.Notification("moodlefetch", msg)
     n.show()
 
-if not config.get('moodle', 'password'):
-  password = getpass.getpass()
-else:
-  password = config.get('moodle', 'password')
-
 if config.get('general', 'output') == "notify":
   pynotify.init("moodlefedch")
+
+if config.get('general', 'keyring') == "true":
+  try:
+    password = keyring.get_password("moodlefetch", config.get('moodle', 'username'))
+    if password == None:
+      keyring.set_password("moodlefetch", config.get('moodle', 'username'), getpass.getpass())
+      password = keyring.get_password("moodlefetch", config.get('moodle', 'username'))
+  except:
+    debug("getting password from keyring failed...")
+    sys.exit(1)
+else:
+  if not config.get('moodle', 'password'):
+    password = getpass.getpass()
+  else:
+    password = config.get('moodle', 'password')
 
 moodle_login(config.get('moodle', 'username'), password)
 moodle_getcourses(config.get('moodle', 'semester'))
