@@ -5,3 +5,13 @@ FH-Hagenberg (Upper Austria). Downloads all
 available pdf documents of a selected semester 
 from the elearning platform and stores them 
 locally in a seperate folder for each course.
+
+REQUIREMENTS:
+- python2.7
+- [OPTIONAL] python-keyring (http://pypi.python.org/pypi/keyring)
+- [OPTIONAL] pynotify
+
+KEYRING FEATURE:
+Works on Linux and MacOSX
+ - Download http://pypi.python.org/packages/source/k/keyring/keyring-0.8.1.zip#md5=fc6b4749d8b10c33b876e894f35f90b3
+ - Unpack and run "python setup.py install" as root!
