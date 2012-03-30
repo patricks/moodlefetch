@@ -1,3 +1,18 @@
+#########################################################################
+# This program is free software: you can redistribute it and/or modify  #
+# it under the terms of the GNU General Public License as published by  #
+# the Free Software Foundation, either version 3 of the License, or     #
+# (at your option) any later version.                                   #
+#                                                                       #
+# This program is distributed in the hope that it will be useful,       #
+# but WITHOUT ANY WARRANTY; without even the implied warranty of        #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         #
+# GNU General Public License for more details.                          #
+#                                                                       #
+# You should have received a copy of the GNU General Public License     #
+# along with this program.  If not, see <http://www.gnu.org/licenses/>. #
+#########################################################################
+
 import re
 import sys, os, ConfigParser
 import urllib
@@ -22,8 +37,6 @@ openerNo303Handler = urllib2.build_opener(MyHTTPRedirectHandler, urllib2.HTTPCoo
 
 def usage():
   print('usage: %s [configfile]' % sys.argv[0])
-
-newfiles = 0 #lazyness...
 
 config = ConfigParser.RawConfigParser()
 if len(sys.argv) == 2:
@@ -69,6 +82,10 @@ def moodle_getcourses(semester):
     split = re.split('\.', re.sub(', ', '.', re.sub('">', '.', re.sub('</a>', '', match))))
     courseid = split[0]
     coursename = split[3]+"-"+split[5]
+    try:
+      coursename = config.get('courses', coursename)
+    except:
+      coursename = split[3]+"-"+split[5]
     debug("looking for new files in: "+coursename)
     moodle_getfiles(courseid, coursename, config.get('general', 'dstdir'))
 
@@ -113,7 +130,6 @@ def moodle_getfiles(courseid, coursename, dstdir):
         moodle_fedch(uri, filename['orig'])
 
 def moodle_fedch(uri, filename):
-  newfiles = 1
   req = urllib2.Request(uri)
   f = opener.open(req)
   debug('writing: '+filename)
@@ -146,7 +162,7 @@ def moodle_logout():
     debug('logout failed')
 
 def debug(msg):
-  if config.get('general', 'output') == "console":
+  if config.get('general', 'output') == "stdout":
     print msg
   if config.get('general', 'output') == "notify":
     n = pynotify.Notification("moodlefetch", msg)
@@ -162,6 +178,4 @@ if config.get('general', 'output') == "notify":
 
 moodle_login(config.get('moodle', 'username'), password)
 moodle_getcourses(config.get('moodle', 'semester'))
-if newfiles == 0:
-  debug("no new files");
 moodle_logout()
