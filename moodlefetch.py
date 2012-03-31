@@ -13,14 +13,14 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>. #
 #########################################################################
 
+__version__ = '0.1'
+
 import re
 import sys, os, ConfigParser
 import urllib
 import urllib2
 import getpass
 import cookielib
-
-__version__ = '0.1'
 
 #
 # DEFAULT CONFIGURATION PATH GOES HERE
