@@ -20,6 +20,8 @@ import urllib2
 import getpass
 import cookielib
 
+__version__ = '0.1'
+
 #
 # DEFAULT CONFIGURATION PATH GOES HERE
 DEFAULTCONFIG = "~/.moodlefetch.cfg"
