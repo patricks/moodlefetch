@@ -50,7 +50,8 @@ else:
 
 if config.get('general', 'output') == "notify":
   import pynotify
-
+if config.get('general', 'output') == "growl":
+  import gntp.notifier
 if config.get('general', 'keyring') == "true":
   import keyring
 
@@ -170,6 +171,8 @@ def debug(msg):
   if config.get('general', 'output') == "notify":
     n = pynotify.Notification("moodlefetch", msg)
     n.show()
+  if config.get('general', 'output') == "growl":
+    gntp.notifier.mini(msg)
 
 if config.get('general', 'output') == "notify":
   pynotify.init("moodlefedch")

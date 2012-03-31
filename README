@@ -10,6 +10,7 @@ REQUIREMENTS:
 - python2.7
 - [OPTIONAL] python-keyring (http://pypi.python.org/pypi/keyring)
 - [OPTIONAL] pynotify
+- [OPTIONAL] gtnp (for osx growl notifications) https://github.com/kfdm/gntp/
 
 CONFIGURATION:
 moodlefetch.py looks for a configuration file named ".moodlefetch.cfg" in the users home directory
