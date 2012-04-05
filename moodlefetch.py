@@ -43,8 +43,15 @@ def usage():
   print('usage: %s [configfile]' % sys.argv[0])
 
 config = ConfigParser.RawConfigParser()
-if len(sys.argv) == 2:
-  config.read(sys.argv[1])
+if(len(sys.argv) == 2):
+  if os.path.isfile(sys.argv[1]):
+    config.read(sys.argv[1])
+  else:
+    if os.path.isfile(os.path.expanduser(DEFAULTCONFIG)):
+      config.read(os.path.expanduser(DEFAULTCONFIG))
+    else:
+      usage()
+      sys.exit()
 else:
   if os.path.isfile(os.path.expanduser(DEFAULTCONFIG)):
     config.read(os.path.expanduser(DEFAULTCONFIG))
@@ -73,6 +80,63 @@ def moodle_login(username, password):
   f = opener.open(req)
   if f:
     debug('login successful')
+
+def moodle_deadlines():
+  uri = 'http://elearning.fh-hagenberg.at/calendar/view.php?view=upcoming'
+  req = urllib2.Request(uri)
+  f = opener.open(req)
+  data = f.read()
+  ids = re.findall(r'(?<=\/mod\/assignment\/view\.php\?id\=)[^"]+', data)
+  for assignmentId in ids:
+    uri = 'http://elearning.fh-hagenberg.at/mod/assignment/view.php?id='+assignmentId
+    req = urllib2.Request(uri)
+    f = opener.open(req)
+    data = f.read()
+    date = re.findall(r'(?<=Abgabetermin:<\/td>    <td class="c1">)[^<]+', data)
+    title = re.findall(r'(?<=<title>)[^<]+', data)
+    print title[0]
+    print "  Deadline: "+date[0]
+    print ""
+
+def moodle_ratings(semester):
+  uri = 'https://elearning.fh-hagenberg.at/?role=0&cat=1&stg=all&sem=&csem=0'
+  req = urllib2.Request(uri)
+  f = opener.open(req)
+  data = f.read()
+  data = re.findall(r'(?<=\<option\ value=").*>'+semester+'<\/option>', data)
+  semesterid = re.split('"', data[0])
+  uri = 'https://elearning.fh-hagenberg.at/?role=0&cat=1&stg=all&sem='+semesterid[0]+'&csem=0'
+  req = urllib2.Request(uri)
+  f = opener.open(req)
+  data = f.read()
+  matches = re.findall(r'(?<=course\/view\.php\?id\=).*</a>', data)
+  for match in matches:
+    split = re.split('\.', re.sub(', ', '.', re.sub('">', '.', re.sub('</a>', '', match))))
+    courseid = split[0]
+    coursename = split[3]+"-"+split[5]
+    print coursename
+    uri = 'http://elearning.fh-hagenberg.at/grade/report/user/index.php?id='+courseid
+    req = urllib2.Request(uri)
+    f = opener.open(req)
+    data = f.read()
+    gradeIds = re.findall(r'(?<=grade\.php\?id\=)[^"]+', data)
+    for gradeid in gradeIds:
+      uri = 'http://elearning.fh-hagenberg.at/mod/assignment/view.php?id='+gradeid
+      req = urllib2.Request(uri)
+      f = opener.open(req)
+      data = f.read()
+      rating = re.findall(r'(?<=class\="grade">)[^<]+', data)
+      title = re.findall(r'(?<=<title>)[^<]+', data)
+      try:
+        print "  - "+title[0]
+      except:
+        print "  - untitled"
+      try:
+        print "  - RATING: "+rating[0]
+      except:
+        print "  - RATING: -"
+      
+  
 
 def moodle_getcourses(semester):
   uri = 'https://elearning.fh-hagenberg.at/?role=0&cat=1&stg=all&sem=&csem=0'
@@ -196,6 +260,16 @@ else:
   else:
     password = config.get('moodle', 'password')
 
-moodle_login(config.get('moodle', 'username'), password)
-moodle_getcourses(config.get('moodle', 'semester'))
-moodle_logout()
+if(len(sys.argv) == 2):
+  if(sys.argv[1] == "--deadlines"):
+    moodle_login(config.get('moodle', 'username'), password)
+    moodle_deadlines()
+    moodle_logout()
+  elif(sys.argv[1] == "--ratings"):
+    moodle_login(config.get('moodle', 'username'), password)
+    moodle_ratings(config.get('moodle', 'semester'))
+    moodle_logout()
+else:
+  moodle_login(config.get('moodle', 'username'), password)
+  moodle_getcourses(config.get('moodle', 'semester'))
+  moodle_logout()
