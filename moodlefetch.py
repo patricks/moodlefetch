@@ -12,7 +12,7 @@ import logging
 # Setup basic logging
 logger = logging.getLogger('moodlefetch')
 logger.setLevel(logging.DEBUG)
-fh = logging.FileHandler('/dev/null')
+fh = logging.FileHandler('/dev/stdout')
 fh.setLevel(logging.DEBUG)
 logger.addHandler(fh)
 
@@ -93,11 +93,14 @@ class Moodlefetch():
         encodedFields = urllib.urlencode(formFields)
         req = urllib2.Request(uri, encodedFields)
         self.opener.open(req)
-        #TODO checking on cj doesnt help anything
-        if self.cj:
+        uri = self.baseuri
+        req = urllib2.Request(uri)
+        f = self.opener.open(req).read()
+        if re.search('logout', f) != None:
             logger.info("logged in")
         else:
             logger.error("login failed. exiting")
+            sys.exit(-1)
             
     def getSemesterId(self, semester):
         uri = self.baseuri+'/?role=0&cat=1&stg=all&sem=&csem=0'
@@ -143,8 +146,8 @@ class Moodlefetch():
             #get files that are not available in our local directory
             for file in course.files_to_get:
                 while True:
-                    #we only want a maximum of 5 parallel downloads
-                    if(threading.activeCount() < 6):
+                    #limit the maximum number of parallel downloads
+                    if(threading.activeCount() < 11):
                         thread = MoodlefetchDownloadFile(self, course, file, bytes_done, bytes_total)
                         thread.start()
                         logger.debug('started download thread for file: '+file.name)
