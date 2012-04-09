@@ -6,11 +6,13 @@ import getpass
 import cookielib
 import new
 import threading, time
+from multiprocessing import Value
 import logging
 
+# Setup basic logging
 logger = logging.getLogger('moodlefetch')
 logger.setLevel(logging.DEBUG)
-fh = logging.FileHandler('/dev/stdout')
+fh = logging.FileHandler('/dev/null')
 fh.setLevel(logging.DEBUG)
 logger.addHandler(fh)
 
@@ -35,17 +37,19 @@ class MoodlefetchGetFilenames(threading.Thread):
             file.id = re.findall(r'(?<=id=)[0-9]+', match)[0]
             file.type = 'pdf' #TODO / just for now
             uri = self.parent.baseuri+'/mod/resource/view.php?inpopup=true&id='+file.id
-            uri = self.parent.openerNo303Handler.open(uri)
-            srcurl, file.name = uri.rsplit('/', 1)
+            f = self.parent.openerNo303Handler.open(uri)
+            srcurl, file.name = f.rsplit('/', 1)
             self.course.addFileAvailable(file)
             logger.debug("course.files_available: added file "+file.name+" with id: "+str(file.id))
 
 class MoodlefetchDownloadFile(threading.Thread):    
-    def __init__(self, parent, course, file):
+    def __init__(self, parent, course, file, bytes_done, bytes_total):
         threading.Thread.__init__(self)
         self.parent = parent
         self.course = course
         self.file = file
+        self.bytes_done = bytes_done
+        self.bytes_total = bytes_total
     def run(self):
         if not os.path.exists(self.course.path):
             try:
@@ -56,11 +60,14 @@ class MoodlefetchDownloadFile(threading.Thread):
         uri = self.parent.baseuri+'/mod/resource/view.php?inpopup=true&id='+str(self.file.id)
         req = urllib2.Request(uri)
         f = self.parent.opener.open(req)
+        logger.debug("received content-length: "+str(f.headers.get("content-length")))
+        self.bytes_total.value += int(f.headers.get("content-length")) 
         try:
             localFile = open(self.course.path+self.file.name, 'w')
             localFile.write(f.read())
             localFile.close()
             logger.info('file saved: '+self.course.path+self.file.name)
+            self.bytes_done.value += int(f.headers.get("content-length")) 
         except:
             logger.error("failed to write "+self.course.path+self.file.name)
 
@@ -73,6 +80,7 @@ class Moodlefetch():
     local_files = []
     baseuri = 'https://elearning.fh-hagenberg.at'
     dir = "/tmp/moodlefetch/"
+    
     def login(self, username, password):
         uri = self.baseuri+'/login/index.php'
         req = urllib2.Request(uri)
@@ -90,6 +98,7 @@ class Moodlefetch():
             logger.info("logged in")
         else:
             logger.error("login failed. exiting")
+            
     def getSemesterId(self, semester):
         uri = self.baseuri+'/?role=0&cat=1&stg=all&sem=&csem=0'
         req = urllib2.Request(uri)
@@ -97,6 +106,7 @@ class Moodlefetch():
         response = f.read()
         response = re.findall(r'(?<=\<option\ value=").*>'+semester+'<\/option>', response)
         self.semesterid = re.split('"', response[0])[0]
+        
     def getCourses(self):
         uri = self.baseuri+'/?role=0&cat=1&stg=all&sem='+self.semesterid+'&csem=0'
         req = urllib2.Request(uri)
@@ -114,26 +124,35 @@ class Moodlefetch():
                 course.name = split[3]+"-"+split[5]
             course.path = self.dir+course.name+'/'
             self.courses.append(course)
+            
     def getLocalFiles(self):
         for top, dirs, files in os.walk(self.dir):
             for nm in files:
                 self.local_files.append(os.path.join(top, nm))
+                
     def sync(self):
+        #get information about local files and compare them to available files
         self.getLocalFiles()
+        bytes_done = Value('d', 0)
+        bytes_total = Value('d', 0)
         for course in self.courses:
             for file in course.files_available:
                 if course.path+file.name not in self.local_files:
                     course.addFileToGet(file)
                     logger.debug("course.files_to_get: added file "+file.name+" with id: "+str(file.id))
+            #get files that are not available in our local directory
             for file in course.files_to_get:
-                while True: #we only want a maximum of 5 parallel downloads
+                while True:
+                    #we only want a maximum of 5 parallel downloads
                     if(threading.activeCount() < 6):
-                        thread = MoodlefetchDownloadFile(self, course, file)
+                        thread = MoodlefetchDownloadFile(self, course, file, bytes_done, bytes_total)
                         thread.start()
                         logger.debug('started download thread for file: '+file.name)
                         break
                     else:
                         time.sleep(0.1)
+                    logger.info(str(bytes_done.value)+"/"+str(bytes_total.value))
+                    print "\r"+str(bytes_done.value)+"/"+str(bytes_total.value)
         while (threading.activeCount() > 1):
             pass
         
@@ -155,8 +174,10 @@ class Course:
         self.path = ""
         self.files_available = []
         self.files_to_get = []
+        
     def addFileAvailable(self, file):
         self.files_available.append(file)
+        
     def addFileToGet(self, file):
         self.files_to_get.append(file)
 
