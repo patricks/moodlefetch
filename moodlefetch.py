@@ -1,29 +1,110 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
 import re
-import sys, os, ConfigParser
+import sys, os
+import ConfigParser
 import urllib
 import urllib2
 import getpass
 import cookielib
-import new
 import threading, time
 from multiprocessing import Value
 import logging
-__program__ = 'moodlefetch'
-__url__ = 'http://github.com/mnlhfr/moodlefetch'
-__author__ = 'Manuel Hofer <S1110239019@students.fh-hagenberg.at>'
+from optparse import OptionParser, OptionGroup
 
-# @todo: config parsing
-username = "S1110239019"
-password = ""
+__program__ = 'moodlefetch'
+__url__     = 'http://github.com/mnlhfr/moodlefetch'
+__author__  = 'Manuel Hofer <S1110239019@students.fh-hagenberg.at>'
+
+# Setup basic logging
+logger = logging.getLogger('moodlefetch')
+logger.setLevel(logging.DEBUG)
+fh = logging.FileHandler('/dev/stdout')
+fh.setLevel(logging.DEBUG)
+logger.addHandler(fh)
+
+# processing configuration
+# initialize with default values
+config = {'username': '',
+          'password': '',
+          'auth_type': 'password',
+          'directory': '.',
+          'semester': 'SS12',
+          }
+
+# option parsing
+parser = OptionParser()
+parser_auth = OptionGroup(parser, "Authentification:")
+parser_auth.add_option("-u", "--username", action="store", type="string", dest="username")
+parser_auth.add_option("-p", "--password", action="store", type="string", dest="password")
+parser_auth.add_option("-a", "--auth_type", action="store", dest="auth_type", help="choose between 'password' and 'keyring'")
+parser.add_option_group(parser_auth)    
+parser_configuration = OptionGroup(parser, "Configuration:")
+parser_configuration.add_option("-c", "--config", action="store", type="string", dest="config", help="configuration file")
+parser_configuration.add_option("-d", "--directory", action="store", type="string", dest="directory", help="directory for moodle file sync")
+parser_configuration.add_option("-s", "--semester", action="store", type="string", dest="semester", help="a string like 'SS12' or 'WS11/12'")
+parser.add_option_group(parser_configuration)
+parser_actions = OptionGroup(parser, "Actions:")
+parser_actions.add_option("--deadlines", action="store_true", dest="getDeadlines")
+parser_actions.add_option("--results", action="store_true", dest="getResults")
+parser_actions.add_option("--sync", action="store_true", dest="sync")
+parser.add_option_group(parser_actions)
+options, args = parser.parse_args()
+
+# configuration parsing
+config_parser = ConfigParser.RawConfigParser()
+default_config = os.path.expanduser('~/.moodlefetch')
+config_path = default_config
+if options.config:
+    config_path = options.config
+elif os.path.isfile(default_config):
+    print "defaultconfig exists"
+    config_path = default_config
+if config_parser.read(config_path):
+    config = {'username': config_parser.get('moodle', 'username'),
+              'password': config_parser.get('moodle', 'password'),
+              'auth_type':  config_parser.get('general', 'auth_type'),
+              'directory': config_parser.get('general', 'directory'),
+              'semester': config_parser.get('moodle', 'semester'),
+              }
+    
+# override config settings with command line args
+if options.username != None:
+    config['username'] = options.username
+if options.password != None:
+    config['password'] = options.password
+if options.auth_type != None:
+    config['auth_type'] = options.auth_type
+if options.directory != None:
+    config['directory'] = options.directory
+if options.semester != None:
+    config['semester'] = options.semester
+
+# check auth_type and get a password
+if config['auth_type'] == "keyring":
+    try:
+        import keyring
+    except:
+        logger.error("unable to import keyring")
+    try:
+        config['password'] = keyring.get_password("moodlefetch", config['username'])
+        if config['password'] == None:
+            keyring.set_password("moodlefetch", config['username'], getpass.getpass())
+            config['password'] = keyring.get_password("moodlefetch", config['username'])
+    except:
+        logger.error("getting password from keyring failed...")
+        sys.exit(10)
+elif config['auth_type'] == 'password':
+    if config['password'] == "":
+        config['password'] = getpass.getpass()
 
 class MyHTTPRedirectHandler(urllib2.HTTPRedirectHandler):
 # since the default urllib2 HTTPRedirectHandler leaves us no option to disable auto-redirects
 # we have to implement our own Handler in order to get the final urls and original filenames from moodle
-  def http_error_303(self, req, fp, code, msg, headers):
-    return headers.getheaders('location')[0]
-  http_error_301 = http_error_302 = http_error_307 = http_error_303
+    def http_error_303(self, req, fp, code, msg, headers):
+        return headers.getheaders('location')[0]
+    http_error_301 = http_error_302 = http_error_307 = http_error_303
 
 class MoodlefetchGetFilenames(threading.Thread):
 # This class is called by the Moodlefetch class in order to populate
@@ -44,16 +125,16 @@ class MoodlefetchGetFilenames(threading.Thread):
         for match in matches:
         # creating a File object for every file, populating it, and adding it to the files_available array
         # of the Course object.
-            file = File()
-            file.id = re.findall(r'(?<=id=)[0-9]+', match)[0]
-            file.type = 'pdf' #TODO / just for now
-            uri = self.parent.baseuri+'/mod/resource/view.php?inpopup=true&id='+file.id
+            f = File()
+            f.id = re.findall(r'(?<=id=)[0-9]+', match)[0]
+            f.type = 'pdf' #TODO / just for now
+            uri = self.parent.baseuri+'/mod/resource/view.php?inpopup=true&id='+f.id
             # we need to use our No303Handler class here to not get directly redirected to
             # be able to read the correct filenames by not following the HTTP303 redirect 
-            f = self.parent.openerNo303Handler.open(uri)
-            srcurl, file.name = f.rsplit('/', 1)
-            self.course.addFileAvailable(file)
-            logger.debug("course.files_available: added file "+file.name+" with id: "+str(file.id))
+            fetcher = self.parent.openerNo303Handler.open(uri)
+            srcurl, f.name = fetcher.rsplit('/', 1)
+            self.course.addFileAvailable(f)
+            logger.debug("course.files_available: added file "+f.name+" with id: "+str(f.id))
 
 class MoodlefetchDownloadFile(threading.Thread):
 # This class is called by the Moodlefetch class in order to download ALL the files
@@ -105,6 +186,7 @@ class Moodlefetch():
     courses = [] # array of Course objects populated by getCourses
     local_files = [] #used to store File objects of files already available in the local directory
     baseuri = 'https://elearning.fh-hagenberg.at'
+    # @todo: change dir to something else
     dir = "/tmp/moodlefetch/" # files downloaded to this directory
     
     def login(self, username, password):
@@ -112,7 +194,6 @@ class Moodlefetch():
         uri = self.baseuri+'/login/index.php'
         req = urllib2.Request(uri)
         f = self.opener.open(req)
-        data = f.read()
         formFields = (
               (r'username', username),
               (r'password', password),
@@ -164,11 +245,18 @@ class Moodlefetch():
             
     def getLocalFiles(self):
     # populates self.local_files with Course objects
+    # @todo:
         for top, dirs, files in os.walk(self.dir):
             for nm in files:
                 self.local_files.append(os.path.join(top, nm))
                 
     def sync(self):
+        logger.debug("getting filenames and corresponding urls")
+        for course in self.courses:
+            thread = MoodlefetchGetFilenames(self, course)
+            thread.start()
+        while (threading.activeCount() > 1):
+            pass
         # get information about local files and compare them to available files
         self.getLocalFiles()
         # create two integers in shared memory to be updated by the download threads
@@ -197,10 +285,32 @@ class Moodlefetch():
         while (threading.activeCount() > 1):
             pass
         
-    def __init__(self, username, password):
+    def getDeadlines(self):
+        # @todo: clean code, maybe rewrite regex, not sure if 100% ok
+        # @todo: make output fancy, e.g. asciitable
+        uri = self.baseuri+'/calendar/view.php?view=upcoming'
+        req = urllib2.Request(uri)
+        f = self.opener.open(req)
+        data = f.read()
+        ids = re.findall(r'(?<=\/mod\/assignment\/view\.php\?id\=)[^"]+', data)
+        for assignmentId in ids:
+            uri = self.baseuri+'/mod/assignment/view.php?id='+assignmentId
+            req = urllib2.Request(uri)
+            f = self.opener.open(req)
+            data = f.read()
+            date = re.findall(r'(?<=Abgabetermin:<\/td>    <td class="c1">)[^<]+', data)
+            title = re.findall(r'(?<=<title>)[^<]+', data)
+            print title[0]
+            print "  Deadline: "+date[0]
+            print ""
+
+        
+    def __init__(self, username, password, semester):
         logger.debug("starting initialization of moodlefetch class")
         self.login(username, password)
         self.getSemesterId('SS12')
+        if self.semesterid == 0:
+            logger.error("failed to get semesterId, exiting")
         self.getCourses()
         logger.debug("finished initialization of moodlefetch class")
             
@@ -228,17 +338,14 @@ class File:
         self.name = ""
 
 if __name__ == "__main__":
-    # Setup basic logging
-    logger = logging.getLogger('moodlefetch')
-    logger.setLevel(logging.DEBUG)
-    fh = logging.FileHandler('/dev/stdout')
-    fh.setLevel(logging.DEBUG)
-    logger.addHandler(fh)
-    # start the magic
-    moodle = Moodlefetch(username, password)
-    for course in moodle.courses:
-        thread = MoodlefetchGetFilenames(moodle, course)
-        thread.start()
-    while (threading.activeCount() > 1):
-        pass
-    moodle.sync()
+    try:
+        moodle = Moodlefetch(config['username'], config['password'], config['semester'])
+    except:
+        logger.error("failed to initialize (maybe you forgot to specifiy username, password or semester?)")
+    
+    if options.getDeadlines:
+        moodle.getDeadlines()
+    if options.getResults:
+        moodle.getResults()
+    if options.sync:
+        moodle.sync()
