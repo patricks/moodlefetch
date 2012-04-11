@@ -47,7 +47,7 @@ parser_configuration.add_option("-s", "--semester", action="store", type="string
 parser.add_option_group(parser_configuration)
 parser_actions = OptionGroup(parser, "Actions:")
 parser_actions.add_option("--deadlines", action="store_true", dest="getDeadlines")
-parser_actions.add_option("--results", action="store_true", dest="getResults")
+parser_actions.add_option("--grades", action="store_true", dest="getGrades")
 parser_actions.add_option("--sync", action="store_true", dest="sync")
 parser.add_option_group(parser_actions)
 options, args = parser.parse_args()
@@ -178,17 +178,40 @@ class MoodlefetchDownloadFile(threading.Thread):
         except:
             logger.error("failed to write "+self.course.path+self.file.name)
 
+class MoodlefetchGetGrades(threading.Thread):
+# @todo: 
+    def __init__(self, parent, course):
+        threading.Thread.__init__(self)
+        self.parent = parent
+        self.course = course
+    def run(self):
+        uri = self.parent.baseuri+'/grade/report/user/index.php?id='+self.course.id
+        req = urllib2.Request(uri)
+        f = self.parent.opener.open(req)
+        grade_ids = re.findall(r'(?<=grade\.php\?id\=)[^"]+', f.read())
+        for grade_id in grade_ids:
+            uri = 'http://elearning.fh-hagenberg.at/mod/assignment/view.php?id='+grade_id
+            req = urllib2.Request(uri)
+            f = self.parent.opener.open(req)
+            grade = Grade()
+            grade.id = grade_id
+            grade.name = re.findall(r'(?<=<title>)[^<]+', f.read()) 
+            # @todo: split points
+            grade.points_has = re.findall(r'(?<=class\="grade">)[^<]+', f.read())
+            grade.points_total = None
+            self.course.addGrade(grade)
+
 class Moodlefetch():
     cj = cookielib.CookieJar()
     opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
     openerNo303Handler = urllib2.build_opener(MyHTTPRedirectHandler, urllib2.HTTPCookieProcessor(cj))
-    semesterid = 0 # getSemesterId will change this
+    semesterid = None # getSemesterId will change this
     courses = [] # array of Course objects populated by getCourses
     local_files = [] #used to store File objects of files already available in the local directory
     baseuri = 'https://elearning.fh-hagenberg.at'
     # @todo: change dir to something else
-    dir = "/tmp/moodlefetch/" # files downloaded to this directory
-    
+    dir = None # files downloaded to this directory
+        
     def login(self, username, password):
     # execute login and exit on failure
         uri = self.baseuri+'/login/index.php'
@@ -303,10 +326,29 @@ class Moodlefetch():
             print title[0]
             print "  Deadline: "+date[0]
             print ""
-
-        
-    def __init__(self, username, password, semester):
+  
+    def getGrades(self):
+    #populates a course with assignment grades
+        for course in self.courses:
+            thread = MoodlefetchGetGrades(self, course)
+            thread.start()
+            logger.debug("started thread: MoodlefetchGetGrades")
+        logger.debug("waiting for threads to finish")
+        while (threading.activeCount() > 1):
+            pass
+        for course in self.courses:
+            for grade in course.grades:
+                print grade.id
+                print grade.name
+                print grade.points_has
+                print grade.points_total
+    
+    def __init__(self, username, password, semester, directory):
         logger.debug("starting initialization of moodlefetch class")
+        if os.path.isdir(directory):
+            self.dir = directory
+        else:
+            logger.error("No such directory!")
         self.login(username, password)
         self.getSemesterId('SS12')
         if self.semesterid == 0:
@@ -317,35 +359,56 @@ class Moodlefetch():
 class Course:
 # entity class describing a course in moodle and providing basic functionality to add File objects
     def __init__(self):
-        self.id = 0
-        self.name = ""
-        self.path = ""
+        self.id = None
+        self.name = None
+        self.path = None
         self.files_available = []
         self.files_to_get = []
-        
+        self.grades = []
+    
     def addFileAvailable(self, file):
         self.files_available.append(file)
         
     def addFileToGet(self, file):
         self.files_to_get.append(file)
+        
+    def addGrade(self, grade):
+        self.grades.append(grade)
 
 class File:
 # entity class for files
 # u dont' say?
     def __init__(self):
-        self.id = 0
-        self.type = "" #for future use
-        self.name = ""
+        self.id = None
+        self.type = None #for future use
+        self.name = None
 
+#class Assignment:
+# entity class for assignments
+# @TODO
+#    def __init__(self):
+#        self.id = None
+#        self.name = None
+#        self.duedate = None
+
+class Grade:
+# class to reflect grades on assignments
+    def __init__(self):
+        self.id = None
+        self.name = None
+        self.points_has = None
+        self.points_total = None
+    
 if __name__ == "__main__":
     try:
-        moodle = Moodlefetch(config['username'], config['password'], config['semester'])
+        moodle = Moodlefetch(config['username'], config['password'], config['semester'], config['directory'])
     except:
         logger.error("failed to initialize (maybe you forgot to specifiy username, password or semester?)")
+        sys.exit(10)
     
     if options.getDeadlines:
         moodle.getDeadlines()
-    if options.getResults:
-        moodle.getResults()
+    if options.getGrades:
+        moodle.getGrades()
     if options.sync:
         moodle.sync()
