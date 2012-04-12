@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import re
-import sys, os
+import sys, os, signal
 import ConfigParser
 import urllib
 import urllib2
@@ -16,6 +16,13 @@ from optparse import OptionParser, OptionGroup
 __program__ = 'moodlefetch'
 __url__     = 'http://github.com/mnlhfr/moodlefetch'
 __author__  = 'Manuel Hofer <S1110239019@students.fh-hagenberg.at>'
+
+# Setup signal handling to avoid Exceptions when CTRL+C is pressed
+def signal_handler(signal, frame):
+        print 'You pressed CTRL+C, exiting gracefully'
+        del moodle
+        sys.exit(0)
+signal.signal(signal.SIGINT, signal_handler)
 
 # Setup basic logging
 logger = logging.getLogger('moodlefetch')
@@ -59,7 +66,7 @@ config_path = default_config
 if options.config:
     config_path = options.config
 elif os.path.isfile(default_config):
-    print "defaultconfig exists"
+    print "defaulting to "+default_config
     config_path = default_config
 if config_parser.read(config_path):
     config = {'username': config_parser.get('moodle', 'username'),
@@ -133,6 +140,7 @@ class MoodlefetchGetFilenames(threading.Thread):
             # be able to read the correct filenames by not following the HTTP303 redirect 
             fetcher = self.parent.openerNo303Handler.open(uri)
             srcurl, f.name = fetcher.rsplit('/', 1)
+            f.name = str(f.name).replace('?forcedownload=1', '')
             self.course.addFileAvailable(f)
             logger.debug("course.files_available: added file "+f.name+" with id: "+str(f.id))
 
@@ -190,16 +198,44 @@ class MoodlefetchGetGrades(threading.Thread):
         f = self.parent.opener.open(req)
         grade_ids = re.findall(r'(?<=grade\.php\?id\=)[^"]+', f.read())
         for grade_id in grade_ids:
-            uri = 'http://elearning.fh-hagenberg.at/mod/assignment/view.php?id='+grade_id
+            uri = self.parent.baseuri+'/mod/assignment/view.php?id='+grade_id
             req = urllib2.Request(uri)
             f = self.parent.opener.open(req)
+            response = f.read()
             grade = Grade()
             grade.id = grade_id
-            grade.name = re.findall(r'(?<=<title>)[^<]+', f.read()) 
-            # @todo: split points
-            grade.points_has = re.findall(r'(?<=class\="grade">)[^<]+', f.read())
-            grade.points_total = None
-            self.course.addGrade(grade)
+            try:
+                grade.name = re.findall(r'(?<=Aufgabe:\ )[^"]+', response)[0]
+                points = re.findall(r'(?<=Bewertung:\ )[^<]+', response)[0]
+                grade.points_has = re.sub(' ', '', re.sub(',', '.', re.findall(r'(?<=)[^/]+', points)[0]))
+                grade.points_total = re.sub(' ', '', re.sub(',', '.', re.findall(r'(?<=/).*', points)[0]))
+                self.course.addGrade(grade)
+            except:
+                logger.debug(self.course.name+": no grades available")
+                pass
+
+class MoodlefetchGetAssignments(threading.Thread):
+    def __init__(self, parent, course):
+        threading.Thread.__init__(self)
+        self.parent = parent
+        self.course = course
+    def run(self):
+        uri = self.parent.baseuri+'/calendar/view.php?view=upcoming&course='+self.course.id
+        req = urllib2.Request(uri)
+        f = self.parent.opener.open(req)
+        response = f.read()
+        assignment_ids = re.findall(r'(?<=\/mod\/assignment\/view\.php\?id\=)[^"]+', response)
+        for assignment_id in assignment_ids:
+            uri = self.parent.baseuri+'/mod/assignment/view.php?id='+assignment_id
+            req = urllib2.Request(uri)
+            f = self.parent.opener.open(req)
+            response = f.read()
+            assignment = Assignment()
+            assignment.id = assignment_id
+            assignment.duedate = re.findall(r'(?<=Abgabetermin:<\/td>    <td class="c1">)[^<]+', response)[0]
+            assignment.name = re.findall(r'(?<=Aufgabe:\ )[^"]+', response)[0]
+            self.course.addAssignment(assignment)
+
 
 class Moodlefetch():
     cj = cookielib.CookieJar()
@@ -244,7 +280,7 @@ class Moodlefetch():
         req = urllib2.Request(uri)
         f = self.opener.open(req)
         response = f.read()
-        response = re.findall(r'(?<=\<option\ value=").*>'+semester+'<\/option>', response)
+        response = re.findall(r'[0-9](?=" >'+semester+')', response)
         self.semesterid = re.split('"', response[0])[0]
         
     def getCourses(self):
@@ -255,16 +291,18 @@ class Moodlefetch():
         data = f.read()
         matches = re.findall(r'(?<=course\/view\.php\?id\=).*</a>', data)
         for match in matches:
-            course = Course()
             split = re.split('\.', re.sub(', ', '.', re.sub('">', '.', re.sub('</a>', '', match))))
-            course.id = split[0]
-            course.name = split[3]+"-"+split[5]
-            try:
-                course.name = config.get('courses', Course.name)
-            except:
+            if split[0] not in self.courses:
+                course = Course()
+                course.id = split[0]
                 course.name = split[3]+"-"+split[5]
-            course.path = self.dir+course.name+'/'
-            self.courses.append(course)
+                try:
+                    course.name = config.get('courses', Course.name)
+                except:
+                    course.name = split[3]+"-"+split[5]
+                course.path = self.dir+course.name+'/'
+                self.courses.append(course)
+                logger.debug("added course "+course.name)
             
     def getLocalFiles(self):
     # populates self.local_files with Course objects
@@ -307,29 +345,30 @@ class Moodlefetch():
         # wait for all threads to finish up downloading
         while (threading.activeCount() > 1):
             pass
+        print "sync done."
         
     def getDeadlines(self):
-        # @todo: clean code, maybe rewrite regex, not sure if 100% ok
-        # @todo: make output fancy, e.g. asciitable
-        uri = self.baseuri+'/calendar/view.php?view=upcoming'
-        req = urllib2.Request(uri)
-        f = self.opener.open(req)
-        data = f.read()
-        ids = re.findall(r'(?<=\/mod\/assignment\/view\.php\?id\=)[^"]+', data)
-        for assignmentId in ids:
-            uri = self.baseuri+'/mod/assignment/view.php?id='+assignmentId
-            req = urllib2.Request(uri)
-            f = self.opener.open(req)
-            data = f.read()
-            date = re.findall(r'(?<=Abgabetermin:<\/td>    <td class="c1">)[^<]+', data)
-            title = re.findall(r'(?<=<title>)[^<]+', data)
-            print title[0]
-            print "  Deadline: "+date[0]
-            print ""
-  
+        for course in self.courses:
+            thread = MoodlefetchGetAssignments(self, course)
+            thread.start()
+            logger.debug("started thread: MoodlefetchGetAssignments")
+        logger.debug("waiting for threads to finish")
+        while (threading.active_count() > 1):
+            pass
+        for course in self.courses:
+            if course.assignments:
+                print "=== "+course.name+" ==="
+            for assignment in course.assignments:
+                print "  * "+assignment.name
+                print "    - "+assignment.duedate
+            if course.assignments:
+                print ""
+            
+        
     def getGrades(self):
     #populates a course with assignment grades
         for course in self.courses:
+            #start one thread for every course
             thread = MoodlefetchGetGrades(self, course)
             thread.start()
             logger.debug("started thread: MoodlefetchGetGrades")
@@ -337,20 +376,23 @@ class Moodlefetch():
         while (threading.activeCount() > 1):
             pass
         for course in self.courses:
+            if course.grades:
+                print "=== "+course.name+" ==="
             for grade in course.grades:
-                print grade.id
-                print grade.name
-                print grade.points_has
-                print grade.points_total
-    
+                print "  * "+grade.name
+                print "    - URL: "+self.baseuri+"/mod/assignment/view.php?id="+grade.id
+                print "    - "+grade.points_has+" / "+grade.points_total
+            if course.grades:
+                print " "
+
     def __init__(self, username, password, semester, directory):
         logger.debug("starting initialization of moodlefetch class")
         if os.path.isdir(directory):
-            self.dir = directory
+            self.dir = os.path.normpath(directory)+os.sep
         else:
             logger.error("No such directory!")
         self.login(username, password)
-        self.getSemesterId('SS12')
+        self.getSemesterId(semester)
         if self.semesterid == 0:
             logger.error("failed to get semesterId, exiting")
         self.getCourses()
@@ -365,7 +407,8 @@ class Course:
         self.files_available = []
         self.files_to_get = []
         self.grades = []
-    
+        self.assignments = []
+        
     def addFileAvailable(self, file):
         self.files_available.append(file)
         
@@ -375,6 +418,9 @@ class Course:
     def addGrade(self, grade):
         self.grades.append(grade)
 
+    def addAssignment(self, assignment):
+        self.assignments.append(assignment)
+
 class File:
 # entity class for files
 # u dont' say?
@@ -383,13 +429,12 @@ class File:
         self.type = None #for future use
         self.name = None
 
-#class Assignment:
+class Assignment:
 # entity class for assignments
-# @TODO
-#    def __init__(self):
-#        self.id = None
-#        self.name = None
-#        self.duedate = None
+    def __init__(self):
+        self.id = None
+        self.name = None
+        self.duedate = None
 
 class Grade:
 # class to reflect grades on assignments
@@ -405,10 +450,10 @@ if __name__ == "__main__":
     except:
         logger.error("failed to initialize (maybe you forgot to specifiy username, password or semester?)")
         sys.exit(10)
-    
+
+    if options.sync:
+        moodle.sync()
     if options.getDeadlines:
         moodle.getDeadlines()
     if options.getGrades:
         moodle.getGrades()
-    if options.sync:
-        moodle.sync()
