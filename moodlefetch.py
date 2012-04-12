@@ -12,6 +12,7 @@ import threading, time
 from multiprocessing import Value
 import logging
 from optparse import OptionParser, OptionGroup
+from progressbar import ProgressBar
 
 __program__ = 'moodlefetch'
 __url__     = 'http://github.com/mnlhfr/moodlefetch'
@@ -26,9 +27,9 @@ signal.signal(signal.SIGINT, signal_handler)
 
 # Setup basic logging
 logger = logging.getLogger('moodlefetch')
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 fh = logging.FileHandler('/dev/stdout')
-fh.setLevel(logging.DEBUG)
+fh.setLevel(logging.INFO)
 logger.addHandler(fh)
 
 # processing configuration
@@ -139,6 +140,13 @@ class MoodlefetchGetFilenames(threading.Thread):
             # we need to use our No303Handler class here to not get directly redirected to
             # be able to read the correct filenames by not following the HTTP303 redirect 
             fetcher = self.parent.openerNo303Handler.open(uri)
+            # no we have the correct URI, so we send a HEAD request, to get http-headers,
+            # containing content-length (we need this to display download status.. obviously
+            uri = fetcher
+            req = urllib2.Request(uri)
+            req.get_method = lambda : 'HEAD'
+            response = self.parent.opener.open(req)
+            f.size = int(response.info().getheaders("Content-Length")[0])
             srcurl, f.name = fetcher.rsplit('/', 1)
             f.name = str(f.name).replace('?forcedownload=1', '')
             self.course.addFileAvailable(f)
@@ -147,7 +155,7 @@ class MoodlefetchGetFilenames(threading.Thread):
 class MoodlefetchDownloadFile(threading.Thread):
 # This class is called by the Moodlefetch class in order to download ALL the files
 # in a specific Course objects files_to_get array.
-    def __init__(self, parent, course, file, bytes_done, bytes_total):
+    def __init__(self, parent, course, file, bytes_done):
     # @param parent: the calling Moodlefetch object itself
     # @param course: the specific Course object to download files for
     # @param file: : the File object to download
@@ -158,7 +166,6 @@ class MoodlefetchDownloadFile(threading.Thread):
         self.course = course
         self.file = file
         self.bytes_done = bytes_done
-        self.bytes_total = bytes_total
     def run(self):
         # create directorys if not existent
         if not os.path.exists(self.course.path):
@@ -172,15 +179,12 @@ class MoodlefetchDownloadFile(threading.Thread):
         uri = self.parent.baseuri+'/mod/resource/view.php?inpopup=true&id='+str(self.file.id)
         req = urllib2.Request(uri)
         f = self.parent.opener.open(req)
-        # get content-length header and add the value to bytes_total
-        logger.debug("received content-length: "+str(f.headers.get("content-length")))
-        self.bytes_total.value += int(f.headers.get("content-length")) 
         # try to save the received data stream to disk
         try:
             localFile = open(self.course.path+self.file.name, 'w')
             localFile.write(f.read())
             localFile.close()
-            logger.info('file saved: '+self.course.path+self.file.name)
+            logger.debug('file saved: '+self.course.path+self.file.name)
             # update bytes_done
             self.bytes_done.value += int(f.headers.get("content-length")) 
         except:
@@ -313,6 +317,7 @@ class Moodlefetch():
                 
     def sync(self):
         logger.debug("getting filenames and corresponding urls")
+        p = ProgressBar()
         for course in self.courses:
             thread = MoodlefetchGetFilenames(self, course)
             thread.start()
@@ -329,22 +334,28 @@ class Moodlefetch():
                 if course.path+file.name not in self.local_files:
                     course.addFileToGet(file)
                     logger.debug("course.files_to_get: added file "+file.name+" with id: "+str(file.id))
-            #get files that are not available in our local directory
-            for file in course.files_to_get:
-                while True:
-                    #limit the maximum number of parallel downloads
-                    if(threading.activeCount() < 11):
-                        thread = MoodlefetchDownloadFile(self, course, file, bytes_done, bytes_total)
-                        thread.start()
-                        logger.debug('started download thread for file: '+file.name)
-                        break
-                    else:
-                        time.sleep(0.1)
-                    logger.info(str(bytes_done.value)+"/"+str(bytes_total.value))
-                    print "\r"+str(bytes_done.value)+"/"+str(bytes_total.value)
-        # wait for all threads to finish up downloading
-        while (threading.activeCount() > 1):
-            pass
+        if course.files_to_get != None:
+            for course in self.courses:
+                #get files that are not available in our local directory
+                for file in course.files_to_get:
+                    bytes_total.value += file.size
+            for course in self.courses:
+                for file in course.files_to_get:
+                    while True:
+                        #limit the maximum number of parallel downloads
+                        if(threading.activeCount() < 11):
+                            thread = MoodlefetchDownloadFile(self, course, file, bytes_done)
+                            thread.start()
+                            logger.debug('started download thread for file: '+file.name)
+                            break
+                        else:
+                            time.sleep(0.05)
+                        p.render(int(bytes_done.value/(bytes_total.value/100)), '%s MB' % int(bytes_total.value/1024/1024))
+            # wait for all threads to finish up downloading
+            while (threading.activeCount() > 1):
+                p.render(int(bytes_done.value/(bytes_total.value/100)), '%s MB' % int(bytes_total.value/1024/1024))
+                time.sleep(0.05)
+            p.render(int(bytes_done.value/(bytes_total.value/100)), '%s MB' % int(bytes_total.value/1024/1024))
         print "sync done."
         
     def getDeadlines(self):
@@ -428,6 +439,7 @@ class File:
         self.id = None
         self.type = None #for future use
         self.name = None
+        self.size = None
 
 class Assignment:
 # entity class for assignments
