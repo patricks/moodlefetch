@@ -12,7 +12,6 @@ import threading, time
 from multiprocessing import Value
 import logging
 from optparse import OptionParser, OptionGroup
-from progressbar import ProgressBar
 
 __program__ = 'moodlefetch'
 __url__     = 'http://github.com/mnlhfr/moodlefetch'
@@ -39,6 +38,7 @@ config = {'username': '',
           'auth_type': 'password',
           'directory': '.',
           'semester': 'SS12',
+          'progressbar': False,
           }
 
 # option parsing
@@ -76,6 +76,13 @@ if config_parser.read(config_path):
               'directory': config_parser.get('general', 'directory'),
               'semester': config_parser.get('moodle', 'semester'),
               }
+
+#check if progressbar is available
+try:
+    from progressbar import ProgressBar
+    config['progressbar'] = True;
+except:
+    logger.debug("no progressbar available")
     
 # override config settings with command line args
 if options.username != None:
@@ -127,30 +134,33 @@ class MoodlefetchGetFilenames(threading.Thread):
         # get the course overview page and match all links to pdf files in it
         uri = self.parent.baseuri+'/course/view.php?id='+self.course.id
         req = urllib2.Request(uri)
-        f = self.parent.opener.open(req)
-        data = f.read()
-        matches = re.findall(r'(?<=href=").*pdf\.gif" class="activityicon" alt="" \/> <span>.*<span', data)
-        for match in matches:
-        # creating a File object for every file, populating it, and adding it to the files_available array
-        # of the Course object.
-            f = File()
-            f.id = re.findall(r'(?<=id=)[0-9]+', match)[0]
-            f.type = 'pdf' #TODO / just for now
-            uri = self.parent.baseuri+'/mod/resource/view.php?inpopup=true&id='+f.id
-            # we need to use our No303Handler class here to not get directly redirected to
-            # be able to read the correct filenames by not following the HTTP303 redirect 
-            fetcher = self.parent.openerNo303Handler.open(uri)
-            # no we have the correct URI, so we send a HEAD request, to get http-headers,
-            # containing content-length (we need this to display download status.. obviously
-            uri = fetcher
-            req = urllib2.Request(uri)
-            req.get_method = lambda : 'HEAD'
-            response = self.parent.opener.open(req)
-            f.size = int(response.info().getheaders("Content-Length")[0])
-            srcurl, f.name = fetcher.rsplit('/', 1)
-            f.name = str(f.name).replace('?forcedownload=1', '')
-            self.course.addFileAvailable(f)
-            logger.debug("course.files_available: added file "+f.name+" with id: "+str(f.id))
+        try:
+            f = self.parent.opener.open(req)
+            data = f.read()
+            matches = re.findall(r'(?<=href=").*pdf\.gif" class="activityicon" alt="" \/> <span>.*<span', data)
+            for match in matches:
+            # creating a File object for every file, populating it, and adding it to the files_available array
+            # of the Course object.
+                f = File()
+                f.id = re.findall(r'(?<=id=)[0-9]+', match)[0]
+                f.type = 'pdf' #TODO / just for now
+                uri = self.parent.baseuri+'/mod/resource/view.php?inpopup=true&id='+f.id
+                # we need to use our No303Handler class here to not get directly redirected to
+                # be able to read the correct filenames by not following the HTTP303 redirect 
+                fetcher = self.parent.openerNo303Handler.open(uri)
+                # no we have the correct URI, so we send a HEAD request, to get http-headers,
+                # containing content-length (we need this to display download status.. obviously
+                uri = fetcher
+                req = urllib2.Request(uri)
+                req.get_method = lambda : 'HEAD'
+                response = self.parent.opener.open(req)
+                f.size = int(response.info().getheaders("Content-Length")[0])
+                srcurl, f.name = fetcher.rsplit('/', 1)
+                f.name = str(f.name).replace('?forcedownload=1', '')
+                self.course.addFileAvailable(f)
+                logger.debug("course.files_available: added file "+f.name+" with id: "+str(f.id))    
+        except:
+            logger.error("error retrieving course information for "+self.course.name)
 
 class MoodlefetchDownloadFile(threading.Thread):
 # This class is called by the Moodlefetch class in order to download ALL the files
@@ -251,19 +261,23 @@ class Moodlefetch():
     baseuri = 'https://elearning.fh-hagenberg.at'
     # @todo: change dir to something else
     dir = None # files downloaded to this directory
-        
+    config = None;
+    
     def login(self, username, password):
     # execute login and exit on failure
         uri = self.baseuri+'/login/index.php'
         req = urllib2.Request(uri)
-        f = self.opener.open(req)
         formFields = (
               (r'username', username),
               (r'password', password),
               )
         encodedFields = urllib.urlencode(formFields)
         req = urllib2.Request(uri, encodedFields)
-        self.opener.open(req)
+        try:
+            self.opener.open(req)
+        except:
+            logger.error(self.baseuri+" seems to be down, exiting.")
+            sys.exit(10)
         # check if we are really logged in
         # since moodle hands out a sessioncookie even if the login failed
         # we cant just check if moodle put us a delicious cookie in our cookiejar.
@@ -291,7 +305,10 @@ class Moodlefetch():
     # populating self.courses[] with Course objects
         uri = self.baseuri+'/?role=0&cat=1&stg=all&sem='+self.semesterid+'&csem=0'
         req = urllib2.Request(uri)
-        f = self.opener.open(req)
+        try:
+            f = self.opener.open(req)
+        except:
+            logger.error("error retrieving course information")
         data = f.read()
         matches = re.findall(r'(?<=course\/view\.php\?id\=).*</a>', data)
         for match in matches:
@@ -315,9 +332,10 @@ class Moodlefetch():
             for nm in files:
                 self.local_files.append(os.path.join(top, nm))
                 
-    def sync(self):
+    def sync(self, progressbar):
         logger.debug("getting filenames and corresponding urls")
-        p = ProgressBar()
+        if config['progressbar']: 
+            p = ProgressBar()
         for course in self.courses:
             thread = MoodlefetchGetFilenames(self, course)
             thread.start()
@@ -331,14 +349,18 @@ class Moodlefetch():
         # loop through each courses File objects and check whether files already exist in our local directory
         for course in self.courses:
             for file in course.files_available:
+                # @TODO: we should also compare filesizes here, in case a remote file has changed!
                 if course.path+file.name not in self.local_files:
                     course.addFileToGet(file)
                     logger.debug("course.files_to_get: added file "+file.name+" with id: "+str(file.id))
+        # @TODO: None isn't correct for an empty array... needs proper fix!
         if course.files_to_get != None:
             for course in self.courses:
                 #get files that are not available in our local directory
                 for file in course.files_to_get:
                     bytes_total.value += file.size
+            if bytes_total.value > 0:
+                print "getting "+str(bytes_total.value/1024)+" kB"
             for course in self.courses:
                 for file in course.files_to_get:
                     while True:
@@ -350,13 +372,20 @@ class Moodlefetch():
                             break
                         else:
                             time.sleep(0.05)
-                        p.render(int(bytes_done.value/(bytes_total.value/100)), '%s MB' % int(bytes_total.value/1024/1024))
+                        if config['progressbar']: 
+                            p.render(int(bytes_done.value/(bytes_total.value/100)), '%s MB' % int(bytes_total.value/1024/1024))
             # wait for all threads to finish up downloading
             while (threading.activeCount() > 1):
-                p.render(int(bytes_done.value/(bytes_total.value/100)), '%s MB' % int(bytes_total.value/1024/1024))
+                if ((config['progressbar'] == True) & (bytes_total.value > 0)): 
+                    p.render(int(bytes_done.value/(bytes_total.value/100)), '%s MB' % int(bytes_total.value/1024/1024))
                 time.sleep(0.05)
-            p.render(int(bytes_done.value/(bytes_total.value/100)), '%s MB' % int(bytes_total.value/1024/1024))
+            if ((config['progressbar'] == True) & (bytes_total.value > 0)): 
+                p.render(int(bytes_done.value/(bytes_total.value/100)), '%s MB' % int(bytes_total.value/1024/1024))
         print "sync done."
+        print "new files:"
+        for course in self.courses:
+            for file in course.files_to_get:
+                print "  - "+file.name
         
     def getDeadlines(self):
         for course in self.courses:
@@ -464,7 +493,7 @@ if __name__ == "__main__":
         sys.exit(10)
 
     if options.sync:
-        moodle.sync()
+        moodle.sync(config['progressbar'])
     if options.getDeadlines:
         moodle.getDeadlines()
     if options.getGrades:
