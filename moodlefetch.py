@@ -75,7 +75,6 @@ if config_parser.read(config_path):
               'auth_type':  config_parser.get('general', 'auth_type'),
               'directory': config_parser.get('general', 'directory'),
               'semester': config_parser.get('moodle', 'semester'),
-              'course_substitutions': config.get('courses')
               }
 
 #check if progressbar is available
@@ -210,24 +209,27 @@ class MoodlefetchGetGrades(threading.Thread):
     def run(self):
         uri = self.parent.baseuri+'/grade/report/user/index.php?id='+self.course.id
         req = urllib2.Request(uri)
-        f = self.parent.opener.open(req)
-        grade_ids = re.findall(r'(?<=grade\.php\?id\=)[^"]+', f.read())
-        for grade_id in grade_ids:
-            uri = self.parent.baseuri+'/mod/assignment/view.php?id='+grade_id
-            req = urllib2.Request(uri)
+        try:
             f = self.parent.opener.open(req)
-            response = f.read()
-            grade = Grade()
-            grade.id = grade_id
-            try:
-                grade.name = re.findall(r'(?<=Aufgabe:\ )[^"]+', response)[0]
-                points = re.findall(r'(?<=Bewertung:\ )[^<]+', response)[0]
-                grade.points_has = re.sub(' ', '', re.sub(',', '.', re.findall(r'(?<=)[^/]+', points)[0]))
-                grade.points_total = re.sub(' ', '', re.sub(',', '.', re.findall(r'(?<=/).*', points)[0]))
-                self.course.addGrade(grade)
-            except:
-                logger.debug(self.course.name+": no grades available")
-                pass
+            grade_ids = re.findall(r'(?<=grade\.php\?id\=)[^"]+', f.read())
+            for grade_id in grade_ids:
+                uri = self.parent.baseuri+'/mod/assignment/view.php?id='+grade_id
+                req = urllib2.Request(uri)
+                f = self.parent.opener.open(req)
+                response = f.read()
+                grade = Grade()
+                grade.id = grade_id
+                try:
+                    grade.name = re.findall(r'(?<=Aufgabe:\ )[^"]+', response)[0]
+                    points = re.findall(r'(?<=Bewertung:\ )[^<]+', response)[0]
+                    grade.points_has = re.sub(' ', '', re.sub(',', '.', re.findall(r'(?<=)[^/]+', points)[0]))
+                    grade.points_total = re.sub(' ', '', re.sub(',', '.', re.findall(r'(?<=/).*', points)[0]))
+                    self.course.addGrade(grade)
+                except:
+                    logger.debug(self.course.name+": no grades available")
+                    pass
+        except:
+            logger.debug("error getting grades for course "+self.course.name)
 
 class MoodlefetchGetAssignments(threading.Thread):
     def __init__(self, parent, course):
@@ -237,19 +239,22 @@ class MoodlefetchGetAssignments(threading.Thread):
     def run(self):
         uri = self.parent.baseuri+'/calendar/view.php?view=upcoming&course='+self.course.id
         req = urllib2.Request(uri)
-        f = self.parent.opener.open(req)
-        response = f.read()
-        assignment_ids = re.findall(r'(?<=\/mod\/assignment\/view\.php\?id\=)[^"]+', response)
-        for assignment_id in assignment_ids:
-            uri = self.parent.baseuri+'/mod/assignment/view.php?id='+assignment_id
-            req = urllib2.Request(uri)
+        try:
             f = self.parent.opener.open(req)
             response = f.read()
-            assignment = Assignment()
-            assignment.id = assignment_id
-            assignment.duedate = re.findall(r'(?<=Abgabetermin:<\/td>    <td class="c1">)[^<]+', response)[0]
-            assignment.name = re.findall(r'(?<=Aufgabe:\ )[^"]+', response)[0]
-            self.course.addAssignment(assignment)
+            assignment_ids = re.findall(r'(?<=\/mod\/assignment\/view\.php\?id\=)[^"]+', response)
+            for assignment_id in assignment_ids:
+                uri = self.parent.baseuri+'/mod/assignment/view.php?id='+assignment_id
+                req = urllib2.Request(uri)
+                f = self.parent.opener.open(req)
+                response = f.read()
+                assignment = Assignment()
+                assignment.id = assignment_id
+                assignment.duedate = re.findall(r'(?<=Abgabetermin:<\/td>    <td class="c1">)[^<]+', response)[0]
+                assignment.name = re.findall(r'(?<=Aufgabe:\ )[^"]+', response)[0]
+                self.course.addAssignment(assignment)
+        except:
+            logger.debug("error getting assignments for course "+self.course.name)
 
 
 class Moodlefetch():
