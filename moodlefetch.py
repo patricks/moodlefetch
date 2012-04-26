@@ -75,6 +75,7 @@ if config_parser.read(config_path):
               'auth_type':  config_parser.get('general', 'auth_type'),
               'directory': config_parser.get('general', 'directory'),
               'semester': config_parser.get('moodle', 'semester'),
+              'course_substitutions': config.get('courses')
               }
 
 #check if progressbar is available
@@ -301,6 +302,7 @@ class Moodlefetch():
         response = re.findall(r'[0-9](?=" >'+semester+')', response)
         self.semesterid = re.split('"', response[0])[0]
         
+    #maybe we should not pass the whole config here
     def getCourses(self):
     # populating self.courses[] with Course objects
         uri = self.baseuri+'/?role=0&cat=1&stg=all&sem='+self.semesterid+'&csem=0'
@@ -318,7 +320,7 @@ class Moodlefetch():
                 course.id = split[0]
                 course.name = split[3]+"-"+split[5]
                 try:
-                    course.name = config.get('courses', Course.name)
+                    course.name = self.config.get('courses', course.name)
                 except:
                     course.name = split[3]+"-"+split[5]
                 course.path = self.dir+course.name+'/'
@@ -425,8 +427,9 @@ class Moodlefetch():
             if course.grades:
                 print " "
 
-    def __init__(self, username, password, semester, directory):
+    def __init__(self, username, password, semester, directory, config):
         logger.debug("starting initialization of moodlefetch class")
+        self.config = config
         if os.path.isdir(directory):
             self.dir = os.path.normpath(directory)+os.sep
         else:
@@ -487,7 +490,8 @@ class Grade:
     
 if __name__ == "__main__":
     try:
-        moodle = Moodlefetch(config['username'], config['password'], config['semester'], config['directory'])
+        # @TODO currently passing config_parser, needs fix
+        moodle = Moodlefetch(config['username'], config['password'], config['semester'], config['directory'], config_parser)
     except:
         logger.error("failed to initialize (maybe you forgot to specifiy username, password or semester?)")
         sys.exit(10)
