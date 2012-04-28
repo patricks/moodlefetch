@@ -27,7 +27,7 @@ signal.signal(signal.SIGINT, signal_handler)
 # Setup basic logging
 logger = logging.getLogger('moodlefetch')
 logger.setLevel(logging.INFO)
-fh = logging.FileHandler('/dev/stdout')
+fh = logging.StreamHandler(sys.stdout)
 fh.setLevel(logging.INFO)
 logger.addHandler(fh)
 
@@ -201,7 +201,6 @@ class MoodlefetchDownloadFile(threading.Thread):
             logger.error("failed to write "+self.course.path+self.file.name)
 
 class MoodlefetchGetGrades(threading.Thread):
-# @todo: 
     def __init__(self, parent, course):
         threading.Thread.__init__(self)
         self.parent = parent
