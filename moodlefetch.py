@@ -26,9 +26,9 @@ signal.signal(signal.SIGINT, signal_handler)
 
 # Setup basic logging
 logger = logging.getLogger('moodlefetch')
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.ERROR)
 fh = logging.StreamHandler(sys.stdout)
-fh.setLevel(logging.INFO)
+fh.setLevel(logging.ERROR)
 logger.addHandler(fh)
 
 # processing configuration
@@ -67,7 +67,7 @@ config_path = default_config
 if options.config:
     config_path = options.config
 elif os.path.isfile(default_config):
-    print "defaulting to "+default_config
+    logger.info("defaulting to "+default_config)
     config_path = default_config
 if config_parser.read(config_path):
     config = {'username': config_parser.get('moodle', 'username'),
