@@ -1,0 +1,26 @@
+moodlefetch
+
+A small python script designed for students at 
+FH-Hagenberg (Upper Austria). Downloads all 
+available pdf documents of a selected semester 
+from the elearning platform and stores them 
+locally in a seperate folder for each course.
+
+REQUIREMENTS:
+- python2.7
+- [OPTIONAL] python-keyring (http://pypi.python.org/pypi/keyring)
+- [OPTIONAL] pynotify
+- [OPTIONAL] gtnp (for osx growl notifications) https://github.com/kfdm/gntp/
+
+CONFIGURATION:
+moodlefetch.py looks for a configuration file named ".moodlefetch" in the users home directory
+you can either put your configuration there or specify the path to your config file when running
+the script.
+for further information see moodlefetch.py --help or/and the moodlefetch sample configuration file
+
+AUTH_TYPE KEYRING:
+-Works on Linux and MacOSX
+ - Download Keyring:
+   http://pypi.python.org/pypi/keyring
+   http://pypi.python.org/packages/source/k/keyring/keyring-0.8.1.zip#md5=fc6b4749d8b10c33b876e894f35f90b3
+ - Unpack and run "python setup.py install" as root!
