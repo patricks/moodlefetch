@@ -18,6 +18,26 @@ you can either put your configuration there or specify the path to your config f
 the script.
 for further information see moodlefetch.py --help or/and the moodlefetch sample configuration file
 
+Usage: moodlefetch [options]
+Options:
+  -h, --help            show this help message and exit
+  Authentification::
+    -u USERNAME, --username=USERNAME
+    -p PASSWORD, --password=PASSWORD
+    -a AUTH_TYPE, --auth_type=AUTH_TYPE
+                        choose between 'password' and 'keyring'
+  Configuration::
+    -c CONFIG, --config=CONFIG
+                        configuration file
+    -d DIRECTORY, --directory=DIRECTORY
+                        directory for moodle file sync
+    -s SEMESTER, --semester=SEMESTER
+                        a string like 'SS12' or 'WS11/12'
+  Actions::
+    --deadlines         
+    --grades            
+    --sync              
+
 AUTH_TYPE KEYRING:
 -Works on Linux and MacOSX
  - Download Keyring:
