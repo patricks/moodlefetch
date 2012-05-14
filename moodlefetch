@@ -1,7 +1,7 @@
 [general]
 # download destination
 directory = /home/manuel/git/SIB/SEM2
-# auth_type, password or keyriong
+# auth_type, password or keyring
 auth_type = keyring
 
 [moodle]
